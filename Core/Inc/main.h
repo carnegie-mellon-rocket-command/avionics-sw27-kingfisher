@@ -27,7 +27,14 @@ extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include "stm32f4xx_hal.h"
+#include "main.h"
+#include "Adafruit_LIS3MDL.h"
+#include "Adafruit_LSM6DSOX.h"
+#include "ms5611.h"
+#include <Servo.h>
+//#include <BasicLinearAlgebra.h> // version 3.7
+#include <Kalman.h>
+#include <cassert>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */

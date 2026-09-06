@@ -18,6 +18,13 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "Adafruit_LIS3MDL.h"
+#include "Adafruit_LSM6DSOX.h"
+#include "ms5611.h"
+#include <Servo.h>
+//#include <BasicLinearAlgebra.h> // version 3.7
+#include <Kalman.h>
+#include <cassert>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -31,7 +38,72 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+// true sets subscale altitude target, false sets fullscale altitude target
+#define SUBSCALE false
 
+// true will NOT actually gather data, only simulate it for testing purposes  
+// false will gather data, FOR LAUNCH
+#define SIMULATE false
+
+// Simulation mode libraries
+#if SIMULATE
+    #include <Dictionary.h>
+    Dictionary * m_simSensorValues = new Dictionary();
+#endif
+
+// Assertions (for debugging)
+#if ENABLE_ASSERTS
+    #define requires(condition) assert(condition)
+    #define ensures(condition) assert(condition)
+#else
+    #define requires(condition) ((void)0)
+    #define ensures(condition) ((void)0)
+#endif
+
+// ⚠⚠⚠ Do not create variables with same name as linalg library ⚠⚠⚠ 
+// using namespace BLA;
+
+// ***************** UNITS (in IPS) *****************
+#define SEA_LEVEL_PRESSURE_HPA 1013.25f
+#define METERS_TO_FEET 3.28084f
+#define ATMOSPHERE_FLUID_DENSITY 0.076474f // lbs/ft^3
+#define GRAVITY 32.174f // ft/s^2
+
+// ***************** CONSTANTS *****************
+#define ROCKET_DRAG_COEFFICIENT 0.46f // Average value from OpenRocket
+#define ROCKET_CROSS_SECTIONAL_AREA 0.0490873852f // The surface area (ft^2) of the rocket facing upwards
+#if SUBSCALE
+    #define ROCKET_MASS 11.28125f // lbs in dry mass (with engine housing but NOT propellant, assuming no ballast)
+#else
+    #define ROCKET_MASS 16.5f // lbs in dry mass (with engine housing but NOT propellant, assuming no ballast)
+#endif
+// #define ROCKET_MASS 19.5625f // lbs in dry mass (with engine housing but NOT propellant)
+#define MAX_FLAP_SURFACE_AREA 0.0479010049f
+#define ATS_MAX_SURFACE_AREA MAX_FLAP_SURFACE_AREA + ROCKET_CROSS_SECTIONAL_AREA // The maximum surface area (ft^2) of the rocket with flaps extended, including rocket's area
+
+// Kalman filter parameters
+#define NumStates 3
+#define NumObservations 2
+#define AltimeterNoise 1.0 // TODO: change
+#define IMUNoise 1.0       // TODO: change
+
+// Model covariance          (TODO: change)
+#define m_p 0.1
+#define m_s 0.1
+#define m_a 0.8
+//Engine/Flight Constants (in ms) - take from simulation rocketpy or openrocket
+#define DEF_motor_burnout_time_min 4000 //prevent ats turn on until time is reached -
+#define DEF_motor_burnout_time_max 5000 //turn on ats when motor burnout is detected or cutoff_time is reached -
+#define DEF_cutoff_apogee_time 65000 //turn off ats when apogee is detected or cutoff_time is reached -
+#define DEF_cutoff_landing_time 300000 //mark as landed when detected or cutoff_time is reached
+// ***************** GLOBALS *****************
+#define SKIP_ATS false // Whether the rocket is NOT running ATS, so don't try to mount servos, etc.
+#define ENABLE_ASSERTS true
+
+
+// ************** DEBUGGING CHECK *************
+//#define DEBUG false
+#define DEBUG_C
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -42,18 +114,206 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+// ***************** FLIGHT PARAMETERS *****************
+const bool DEBUG = true; // Whether to print debugging messages to the serial monitor (even if SIMULATE is off)
+const int LOOP_TARGET_MS = 30; // How frequently data should be collected (in milliseconds)
 
+// Target altitude in feet
+#if SUBSCALE
+    const float ALT_TARGET = 3750.0f; // ft
+#else
+    const float ALT_TARGET = 4500.0f; // ft above launch pad
+#endif
+const float ACCEL_THRESHOLD = 3 * GRAVITY; // Acceleration threshold for launch detection (ft/s^2)
+const float VELOCITY_THRESHOLD = 0.1f;     // Velocity threshold for landing detection (ft/s)
+
+// ***************** ATS SERVO PARAMETERS *****************
+Servo m_atsServo;
+float gATSPosition = 0.0f;
+const int ATS_MIN = 180;
+const int ATS_MAX = 13; // 254 constraint from flaps / 270 (servo max) * 180 (library function mapping)
+const float ATS_IN = 0.0f;
+const float ATS_OUT = 1.0f;
+
+// memory parameters
+
+// ***************** SENSOR OBJECTS *****************
+Adafruit_BMP3XX m_bmp;   // Altimeter
+Adafruit_LSM6DSOX m_sox; // IMU
+sensors_event_t accel, gyro, temp;
+
+// ***************** MEASUREMENT VARIABLES *****************
+String gBuffer; // Keeps track of data until it is written to the SD card
+const int buffer_size = 50; // Number of measurements to take before writing to SD card
+unsigned long gStartTime, gCurrTime, gTimer, gTimeDelta, gPrevLoopTime = 0; // Keeps track of time to make sure we are taking measurements at a consistent rate
+float gAltFiltered, gVelocityFiltered, gAccelFiltered, gPredictedAltitude; // Filtered measurements shall be kept as global variables; raw data will be kept local to save memory
+
+// Internal stuff for the Kalman Filter
+float altitude_filtered_previous, acceleration_filtered_previous = 0.0f;
+float gain_altitude, gain_acceleration, cov_altitude_current, cov_acceleration_current, cov_altitude_previous, cov_acceleration_previous = 0.0f;
+float variance_altitude, variance_acceleration = 0.1f; // Might want to change these based on experiments or by calculating in flight
+float previous_velocity_filtered = 0.0f; // We don't necessarily need this variable at this point, but it will be used when more advanced filtering techniques are implemented
+bool gLaunched, gLanded; // Remembers if the rocket has launched and landed
+unsigned long gLaunchTime;
+float absolute_alt_target = ALT_TARGET;
+
+// Kalman filter stuff
+BLA::Matrix<NumObservations> obs; // Observation vector
+KALMAN<NumStates,NumObservations> KalmanFilter; // Kalman filter
+BLA::Matrix<NumStates> measurement_state;
+
+// ***************** PIN DEFINITIONS *****************
+const int ATS_PIN = 6; //TODO
+const int LED_PIN = LED_BUILTIN; //TODO
+const int altimeter_chip_select = 10;     // TODO
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+/** @brief Initializes all devices, test devices and ATS */
+void setup();
 
+/** @brief Ensures data collected at same rate
+  * Ensures each iteration in arduino main loop for loop runs at same rate */
+void runTimer();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+// ***************** ENTRY POINT TO THE PROGRAM *****************
+void setup() {
+    LEDSetup();
+
+    // Setup serial terminal
+    Serial.begin(115200); //Baud rate (bps)
+    Serial.println("Initializing...");
+
+    // Initalize Simulator
+    #if SIMULATE
+        startSimulation();
+    #endif
+
+    // Initialize SD card
+    if (!initializeSDCard()) {
+        Serial.println("SD card setup failed. Aborting.");
+        LEDError();
+    }
+
+    // Determine File to write to
+    determineWriteFile();
+
+    // Initialize sensors
+    if (!setupSensors()) {
+        Serial.println("Sensor setup failed. Aborting.");
+        LEDError();
+    }
+    
+    // Test if all sensors on Altimeter works
+    if (!testSensors()) {
+        Serial.println("One or more altimeter sensors are not working");
+        LEDError();
+    }
+    
+    Serial.println("All sensors working!");
+    testATS();
+
+    // Initalize time evolution matrix
+    KalmanFilter.F = {1.0, 0.0, 0.0,
+                      0.0, 1.0, 0.0,
+                      0.0, 0.0, 1.0};
+    // measurement matrix (first row: altimeter, second row: accelerometer)
+    KalmanFilter.H = {1.0, 0.0, 0.0,
+                      0.0, 0.0, 1.0};
+    // measurement covariance matrix
+    KalmanFilter.R = {AltimeterNoise*AltimeterNoise, 0.0,
+                      0.0,                           IMUNoise*IMUNoise};
+    // model covariance matrix
+    KalmanFilter.Q = {m_p*m_p, 0.0,     0.0,
+                      0.0,     m_s*m_s, 0.0,
+                      0.0,     0.0,     m_a*m_a};
+
+    obs.Fill(0.0);
+    measurement_state.Fill(0.0);
+
+    Serial.println("Arduino is ready!");
+    LEDSuccess();
+    gStartTime = millis();
+    gLaunchTime = gStartTime;
+
+}
+
+void loop() {
+    gBuffer = "";
+    for (int i = 0; i < buffer_size; i++) {
+        runTimer(); // Ensures loop runs at a consistent rate
+
+        // Get measurements from sensors and add to buffer
+        gBuffer = gBuffer + getMeasurements() + "\n";
+
+        // **** (PRE-FLIGHT) ****
+        // Detect launch based on acceleration threshold
+        if (gAccelFiltered > ACCEL_THRESHOLD && !gLaunched) {
+            // Write CSV header to the file
+            writeData("***************** START OF DATA ***************** TIME SINCE READY: " + String(millis() - gStartTime) + " ***************** TICK SPEED: " + String(LOOP_TARGET_MS) + "ms\n");
+            writeData("time, pressure (hPa), altitude_raw (ft), acceleration_raw_x (ft/s^2), acceleration_raw_y, acceleration_raw_z, gyro_x (radians/s), gyro_y, gyro_z, gAltFiltered (ft), gVelocityFiltered (ft/s), gAccelFiltered (ft/s^2), temperature (from IMU; degrees C), gATSPosition (servo degrees), gAltPredicted (ft)\n");
+
+            if (DEBUG) {Serial.println("Rocket has launched!");}
+            gLaunched = true;
+            gLaunchTime = millis();
+            
+            // Bring the ATS back online
+            attachATS();
+            setATSPosition(ATS_IN);
+
+            // Set status LED
+            LEDLogging();
+        }
+
+        // **** (DURING FLIGHT) ****
+        // If the rocket has launched, adjust the ATS as necessary, and detect whether the rocket has landed
+        if (gLaunched) {
+            LEDFlying();
+            adjustATS();
+            if (detectLanding()) {
+                gLanded = true;
+            }
+        }
+        else {
+            // If we are still on the pad, measure the altitude of the launch pad
+            absolute_alt_target = ALT_TARGET + gAltFiltered;
+        }
+    }
+
+    if (gLaunched) {
+        writeData(gBuffer);
+    }
+
+    // **** (END OF FLIGHT) ****
+    if (gLanded) {
+        // End the program
+        detachATS();
+        if (DEBUG) {Serial.println("Rocket has landed, ending program");}
+        while (true);
+    }
+}
+
+void runTimer() {
+    long tempTime = millis() - gPrevLoopTime;
+    // Serial.println(tempTime);
+    if (tempTime < LOOP_TARGET_MS) {
+        delayMicroseconds((LOOP_TARGET_MS - tempTime) * 1000);
+    }
+    else if (tempTime > LOOP_TARGET_MS + 1) {
+        Serial.println("Board is unable to keep up with target loop time of " + String(LOOP_TARGET_MS) + " ms (execution took "+ String(tempTime) + " ms)");
+    }
+    gCurrTime = millis();
+    gTimer = gCurrTime - gStartTime;
+    gTimeDelta = gCurrTime - gPrevLoopTime;
+    // Serial.println(loop_time);
+    gPrevLoopTime = gCurrTime;
+}
 /* USER CODE END 0 */
 
 /**
@@ -90,10 +350,64 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  // Repeats indefinitely after setup() is finished
+  /** @brief Collect/log data and control ATS */
   while (1)
   {
-    /* USER CODE END WHILE */
+    gBuffer = "";
+    for (int i = 0; i < buffer_size; i++) {
+      runTimer(); // Ensures loop runs at a consistent rate
 
+      // Get measurements from sensors and add to buffer
+      gBuffer = gBuffer + getMeasurements() + "\n";
+
+      // **** (PRE-FLIGHT) ****
+      // Detect launch based on acceleration threshold
+      if (gAccelFiltered > ACCEL_THRESHOLD && !gLaunched) {
+        // Write CSV header to the file
+        writeData("***************** START OF DATA ***************** TIME SINCE READY: " + String(millis() - gStartTime) + " ***************** TICK SPEED: " + String(LOOP_TARGET_MS) + "ms\n");
+        writeData("time, pressure (hPa), altitude_raw (ft), acceleration_raw_x (ft/s^2), acceleration_raw_y, acceleration_raw_z, gyro_x (radians/s), gyro_y, gyro_z, gAltFiltered (ft), gVelocityFiltered (ft/s), gAccelFiltered (ft/s^2), temperature (from IMU; degrees C), gATSPosition (servo degrees), gAltPredicted (ft)\n");
+
+        if (DEBUG) {Serial.println("Rocket has launched!");}
+        gLaunched = true;
+        gLaunchTime = millis();
+        
+        // Bring the ATS back online
+        attachATS();
+        setATSPosition(ATS_IN);
+
+        // Set status LED
+        LEDLogging();
+      }
+
+        // **** (DURING FLIGHT) ****
+        // If the rocket has launched, adjust the ATS as necessary, and detect whether the rocket has landed
+        if (gLaunched) {
+          LEDFlying();
+          adjustATS();
+          if (detectLanding()) {
+              gLanded = true;
+          }
+        }
+        else {
+          // If we are still on the pad, measure the altitude of the launch pad
+          absolute_alt_target = ALT_TARGET + gAltFiltered;
+        }
+    }
+
+    if (gLaunched) {
+      writeData(gBuffer);
+    }
+
+    // **** (END OF FLIGHT) ****
+    if (gLanded) {
+      // End the program
+      detachATS();
+      if (DEBUG) {Serial.println("Rocket has landed, ending program");}
+      while (true);
+    }
+    /* USER CODE END WHILE */
+    
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
