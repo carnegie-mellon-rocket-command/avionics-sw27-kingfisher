@@ -1,9 +1,9 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
+  *****************************************************************************
   * @file           : main.c
   * @brief          : Main program body
-  ******************************************************************************
+  *****************************************************************************
   * @attention
   *
   * Copyright (c) 2026 STMicroelectronics.
@@ -13,73 +13,71 @@
   * in the root directory of this software component.
   * If no LICENSE file comes with this software, it is provided AS-IS.
   *
-  ******************************************************************************
+  *****************************************************************************
   */
 /* USER CODE END Header */
-/* Includes ------------------------------------------------------------------*/
+
+
+/* Includes -----------------------------------------------------------------*/
 #include "main.h"
-#include "Adafruit_LIS3MDL.h"
-#include "Adafruit_LSM6DSOX.h"
-#include "ms5611.h"
+
+
+/* Private includes ---------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+/** @brief includes here will be protected when regenerating code from CubeMX */
+#include "linear-algebra.h"
 #include <Servo.h>
-//#include <BasicLinearAlgebra.h> // version 3.7
 #include <Kalman.h>
 #include <cassert>
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
 
+/* Private typedef ----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+/** @brief we do not use any custom types in Kingfisher (yet) */
 /* USER CODE END PTD */
 
-/* Private define ------------------------------------------------------------*/
+
+/* Private define -----------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/** @brief constants used throughout main Kingfisher code defined here */
 // true sets subscale altitude target, false sets fullscale altitude target
 #define SUBSCALE false
 
-// true will NOT actually gather data, only simulate it for testing purposes  
-// false will gather data, FOR LAUNCH
-#define SIMULATE false
-
-// Simulation mode libraries
-#if SIMULATE
-    #include <Dictionary.h>
-    Dictionary * m_simSensorValues = new Dictionary();
-#endif
-
 // Assertions (for debugging)
 #if ENABLE_ASSERTS
-    #define requires(condition) assert(condition)
-    #define ensures(condition) assert(condition)
+  #define requires(condition) assert(condition)
+  #define ensures(condition) assert(condition)
 #else
-    #define requires(condition) ((void)0)
-    #define ensures(condition) ((void)0)
+  #define requires(condition) ((void)0)
+  #define ensures(condition) ((void)0)
 #endif
 
-// ⚠⚠⚠ Do not create variables with same name as linalg library ⚠⚠⚠ 
-// using namespace BLA;
-
-// ***************** UNITS (in IPS) *****************
+// ****************************** UNITS (in IPS) ******************************
 #define SEA_LEVEL_PRESSURE_HPA 1013.25f
 #define METERS_TO_FEET 3.28084f
 #define ATMOSPHERE_FLUID_DENSITY 0.076474f // lbs/ft^3
 #define GRAVITY 32.174f // ft/s^2
 
-// ***************** CONSTANTS *****************
-#define ROCKET_DRAG_COEFFICIENT 0.46f // Average value from OpenRocket
-#define ROCKET_CROSS_SECTIONAL_AREA 0.0490873852f // The surface area (ft^2) of the rocket facing upwards
-#if SUBSCALE
-    #define ROCKET_MASS 11.28125f // lbs in dry mass (with engine housing but NOT propellant, assuming no ballast)
+// ****************************** CONSTANTS ***********************************
+// Average value from OpenRocket
+#define ROCKET_DRAG_COEFFICIENT 0.46f
+
+// The surface area (ft^2) of the rocket facing upwards
+#define ROCKET_CROSS_SECTIONAL_AREA 0.0490873852f
+
+// lbs in dry mass (with engine housing but NOT propellant, assuming no ballast)
+#if SUBSCALE  
+  #define ROCKET_MASS 11.28125f
 #else
-    #define ROCKET_MASS 16.5f // lbs in dry mass (with engine housing but NOT propellant, assuming no ballast)
+  #define ROCKET_MASS 16.5f
 #endif
-// #define ROCKET_MASS 19.5625f // lbs in dry mass (with engine housing but NOT propellant)
+
 #define MAX_FLAP_SURFACE_AREA 0.0479010049f
-#define ATS_MAX_SURFACE_AREA MAX_FLAP_SURFACE_AREA + ROCKET_CROSS_SECTIONAL_AREA // The maximum surface area (ft^2) of the rocket with flaps extended, including rocket's area
+
+// The maximum surface area (ft^2) of the rocket with flaps extended, 
+// including rocket's area
+#define ATS_MAX_SURFACE_AREA MAX_FLAP_SURFACE_AREA + ROCKET_CROSS_SECTIONAL_AREA
 
 // Kalman filter parameters
 #define NumStates 3
@@ -91,43 +89,51 @@
 #define m_p 0.1
 #define m_s 0.1
 #define m_a 0.8
-//Engine/Flight Constants (in ms) - take from simulation rocketpy or openrocket
-#define DEF_motor_burnout_time_min 4000 //prevent ats turn on until time is reached -
-#define DEF_motor_burnout_time_max 5000 //turn on ats when motor burnout is detected or cutoff_time is reached -
-#define DEF_cutoff_apogee_time 65000 //turn off ats when apogee is detected or cutoff_time is reached -
-#define DEF_cutoff_landing_time 300000 //mark as landed when detected or cutoff_time is reached
-// ***************** GLOBALS *****************
-#define SKIP_ATS false // Whether the rocket is NOT running ATS, so don't try to mount servos, etc.
+
+//Engine/Flight Constants (in ms) - take from OpenRocket
+//prevent ATS turn on until time is reached
+#define DEF_motor_burnout_time_min 4000
+//turn on ats when motor burnout is detected or cutoff_time is reached
+#define DEF_motor_burnout_time_max 5000
+//turn off ats when apogee is detected or cutoff_time is reached
+#define DEF_cutoff_apogee_time 65000
+//mark as landed when detected or cutoff_time is reached
+#define DEF_cutoff_landing_time 300000
+
+// ****************************** GLOBALS *************************************
+// Whether the rocket is NOT running ATS, so don't try to mount servos, etc.
+#define SKIP_ATS false 
 #define ENABLE_ASSERTS true
 
-
-// ************** DEBUGGING CHECK *************
+// ****************************** DEBUGGING CHECK *****************************
 //#define DEBUG false
 #define DEBUG_C
 /* USER CODE END PD */
 
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
 
+/* Private macro ------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+/** @brief Kingfisher does not have any macros, which are like calculated constants */
 /* USER CODE END PM */
 
-/* Private variables ---------------------------------------------------------*/
-
+/* Private variables --------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-// ***************** FLIGHT PARAMETERS *****************
-const bool DEBUG = true; // Whether to print debugging messages to the serial monitor (even if SIMULATE is off)
+//** @brief  */
+// ****************************** FLIGHT PARAMETERS ***************************
+// Whether to print debugging messages to the serial monitor
+const bool DEBUG = true; 
 const int LOOP_TARGET_MS = 30; // How frequently data should be collected (in milliseconds)
 
 // Target altitude in feet
 #if SUBSCALE
-    const float ALT_TARGET = 3750.0f; // ft
+  const float ALT_TARGET = 3750.0f; // ft
 #else
-    const float ALT_TARGET = 4500.0f; // ft above launch pad
+  const float ALT_TARGET = 4500.0f; // ft above launch pad
 #endif
 const float ACCEL_THRESHOLD = 3 * GRAVITY; // Acceleration threshold for launch detection (ft/s^2)
 const float VELOCITY_THRESHOLD = 0.1f;     // Velocity threshold for landing detection (ft/s)
 
-// ***************** ATS SERVO PARAMETERS *****************
+// ****************************** ATS SERVO PARAMETERS ************************
 Servo m_atsServo;
 float gATSPosition = 0.0f;
 const int ATS_MIN = 180;
@@ -137,7 +143,7 @@ const float ATS_OUT = 1.0f;
 
 // memory parameters
 
-// ***************** SENSOR OBJECTS *****************
+// ****************************** SENSOR OBJECTS *****************
 Adafruit_BMP3XX m_bmp;   // Altimeter
 Adafruit_LSM6DSOX m_sox; // IMU
 sensors_event_t accel, gyro, temp;
@@ -158,9 +164,10 @@ unsigned long gLaunchTime;
 float absolute_alt_target = ALT_TARGET;
 
 // Kalman filter stuff
-BLA::Matrix<NumObservations> obs; // Observation vector
-KALMAN<NumStates,NumObservations> KalmanFilter; // Kalman filter
-BLA::Matrix<NumStates> measurement_state;
+matrix* time_evolution_mat;
+matrix* measurement_mat;
+matrix* measurement_covariance_mat;
+matrix* model_covariance_mat;
 
 // ***************** PIN DEFINITIONS *****************
 const int ATS_PIN = 6; //TODO
@@ -181,19 +188,13 @@ void runTimer();
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-// ***************** ENTRY POINT TO THE PROGRAM *****************
+/* user entry point */
 void setup() {
     LEDSetup();
 
     // Setup serial terminal
     Serial.begin(115200); //Baud rate (bps)
     Serial.println("Initializing...");
-
-    // Initalize Simulator
-    #if SIMULATE
-        startSimulation();
-    #endif
 
     // Initialize SD card
     if (!initializeSDCard()) {
@@ -220,15 +221,23 @@ void setup() {
     testATS();
 
     // Initalize time evolution matrix
-    KalmanFilter.F = {1.0, 0.0, 0.0,
-                      0.0, 1.0, 0.0,
-                      0.0, 0.0, 1.0};
+    double *time_evol_arr = calloc(9 * sizeof(double));
+    time_evol_arr[0] = 1.0;
+    time_evol_arr[4] = 1.0;
+    time_evol_arr[8] = 1.0;
+    time_evolution_mat = newMatrix(time_evol_arr, 3, 3);
+
     // measurement matrix (first row: altimeter, second row: accelerometer)
-    KalmanFilter.H = {1.0, 0.0, 0.0,
-                      0.0, 0.0, 1.0};
+    double *measurement_arr = calloc(6 * sizeof(double));
+    measurement_arr[0] = 1.0;
+    measurement_arr[5] = 1.0;
+    measurement_mat = newMatrix(measurement_arr, 2, 3);
+    
     // measurement covariance matrix
+    double *measurement_arr = calloc(4 * sizeof(double))
     KalmanFilter.R = {AltimeterNoise*AltimeterNoise, 0.0,
                       0.0,                           IMUNoise*IMUNoise};
+    
     // model covariance matrix
     KalmanFilter.Q = {m_p*m_p, 0.0,     0.0,
                       0.0,     m_s*m_s, 0.0,
