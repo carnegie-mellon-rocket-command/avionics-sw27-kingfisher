@@ -8,16 +8,22 @@
 
 //Canard Allocation (take torques and make actual servo angles)
 
-float max_angle = 10;//I think this should be max angle in one direction from neutral
+float max_angle = 8; //This we will get from mechanical
 
-float* torque_to_motor_position(float t_roll, float t_pitch, float t_yaw){
-    float* motor_positions = (float*)malloc(4*sizeof(float));
-    motor_positions[0] = (t_pitch + t_roll) * max_angle;
-    motor_positions[1] = (t_yaw + t_roll) * max_angle;
-    motor_positions[2] = (-t_pitch + t_roll) * max_angle;
-    motor_positions[3] = (-t_yaw + t_roll) * max_angle;
-    return motor_positions;
-    //returns an array of motor positions from neutral, in order of top, right, bottom, left 
+void torque_to_motor_position(float t_roll, float t_pitch, float t_yaw, float motor_positions[4]){
+    motor_positions[0] = (t_pitch + t_roll) * max_angle; //Top Fin 1
+    motor_positions[1] = (t_yaw + t_roll) * max_angle; //Right Fin 2
+    motor_positions[2] = (-t_pitch + t_roll) * max_angle; //Bottom Fin 3
+    motor_positions[3] = (-t_yaw + t_roll) * max_angle; //Left Fin 4
+    //now motor_positions contains angles for each of the motors
+
+    //Clamps the angles within the max angle   
+    for (int i = 0; i < 4; i++) {
+        if (motor_positions[i] > max_angle) {
+            motor_positions[i] = max_angle;
+        } else if (motor_positions[i] < -max_angle) {
+            motor_positions[i] = -max_angle;
+        }
 };
 
 //Data Logging and Actuation (write the data we need and actually write the servo)
