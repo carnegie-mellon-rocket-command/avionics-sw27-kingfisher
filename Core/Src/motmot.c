@@ -19,11 +19,8 @@ void torque_to_motor_position(float t_roll, float t_pitch, float t_yaw, float mo
 
     //Clamps the angles within the max angle   
     for (int i = 0; i < 4; i++) {
-        if (motor_positions[i] > max_angle) {
-            motor_positions[i] = max_angle;
-        } else if (motor_positions[i] < -max_angle) {
-            motor_positions[i] = -max_angle;
-        }
+        float mangle = motor_positions[i];
+        motor_positions[i] = (mangle < -max_angle) ? -max_angle : (mangle > max_angle) ? max_angle: mangle; 
 };
 
 //Data Logging and Actuation (write the data we need and actually write the servo)
