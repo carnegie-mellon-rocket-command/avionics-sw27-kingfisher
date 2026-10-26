@@ -118,7 +118,7 @@
 
 /* Private variables --------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-//** @brief  */
+/** @brief  */
 // ****************************** FLIGHT PARAMETERS ***************************
 // Whether to print debugging messages to the serial monitor
 const bool DEBUG = true; 
