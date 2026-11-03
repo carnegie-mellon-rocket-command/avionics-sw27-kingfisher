@@ -11,6 +11,7 @@
 #include <Adafruit_SPIDevice.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
+#include <stdbool.h>
 
 /*=========================================================================
 I2C ADDRESS/BITS
