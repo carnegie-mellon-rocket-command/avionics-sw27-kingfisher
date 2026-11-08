@@ -16,6 +16,11 @@
 #include "ext_flash_mem.h"
 #include "ext_lfs_config.h"
 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdbool.h>
+
 // lfs Function Implementations
 
 static int lfs_mem_read(const struct lfs_config *c, lfs_block_t block,
@@ -62,7 +67,7 @@ static int lfs_mem_sync(const struct lfs_config *c) {
 // Read buffer and program buffer for littlefs internal caching
 static uint8_t lfs_read_buf[LFS_MEM_cache_size];
 static uint8_t lfs_prog_buf[LFS_MEM_cache_size];
-static uint8_t lfs_lookahead_buf[LFS_MEM_lookahead_size]; // 64 bytes = 512 blocks tracking
+static uint8_t lfs_lookahead_buf[LFS_MEM_lookahead_size];
 
 
 const struct lfs_config cfg = {
@@ -87,11 +92,17 @@ const struct lfs_config cfg = {
     .lookahead_buffer = lfs_lookahead_buf,
 };
 
-//simple function to set up the filesystem
-void fs_Init(SPI_HandleTypeDef* hspi1,lfs_t* lfs){
-    MEM_Init(hspi1);
+static lfs_t lfs;
+static SPI_HandleTypeDef hspi;
+static char file_name[32] = "default.txt";
 
-    // 2. Optional: Verify JEDEC ID (0xEF4018)
+/**
+ * @brief Sets up the filesystem
+ */
+void fs_Init(){
+    MEM_Init(&hspi1);
+
+    // Verify JEDEC ID
     uint32_t id = MEM_ReadJEDECID();
     if ((id & 0x00FFFFFF) != MEM_JEDEC_ID) {
         // Flash chip mismatch or hardware fault
@@ -99,12 +110,12 @@ void fs_Init(SPI_HandleTypeDef* hspi1,lfs_t* lfs){
     }
 
     // 3. Mount littlefs (Format if first boot/mount fails)
-    int err = lfs_mount(lfs, &cfg);
+    int err = lfs_mount(&lfs, &cfg);
     if (err) {
         // First boot or corrupt filesystem: format memory
-        err = lfs_format(lfs, &cfg);
+        err = lfs_format(&lfs, &cfg);
         if (err == LFS_ERR_OK) {
-            err = lfs_mount(lfs, &cfg);
+            err = lfs_mount(&lfs, &cfg);
         }
     }
 
@@ -114,5 +125,57 @@ void fs_Init(SPI_HandleTypeDef* hspi1,lfs_t* lfs){
     }
 }
 
+/**
+ * @brief Appends text data to the currently determined launch file.
+ */
+void writeData(const char *text) {
+    if (text == NULL) {
+        return;
+    }
+
+    lfs_file_t file;
+    // Open in Read/Write, Append, and Create mode if it doesn't exist
+    int err = lfs_file_open(&lfs, &file, file_name, LFS_O_RDWR | LFS_O_CREAT | LFS_O_APPEND);
+    if (err >= 0) {
+        lfs_file_write(&lfs, &file, text, strlen(text));
+        lfs_file_close(&lfs, &file);
+    }
+}
+
+/**
+ * @brief Scans root directory for "launch_X.txt" files and sets file_name to "launch_<X+1>.txt".
+ */
+void DetermineWriteFile(void) {
+
+    lfs_dir_t dir;
+    struct lfs_info info;
+    int latestLaunch = 0;
+
+    // Open root directory
+    int err = lfs_dir_open(&lfs, &dir, "/");
+    if (err < 0) {
+        // use default.txt if directory opening fails
+    	return;
+    }
+
+    // Iterate through directory entries
+    while (lfs_dir_read(&lfs, &dir, &info) > 0) {
+        // Only inspect regular files (ignore directories)
+        if (info.type == LFS_TYPE_REG) {
+            if (strncmp(info.name, "launch_", 7) == 0) {
+                // Extract number following "launch_"
+                int curLaunchFileNumber = atoi(&info.name[7]);
+                if (curLaunchFileNumber > latestLaunch) {
+                    latestLaunch = curLaunchFileNumber;
+                }
+            }
+        }
+    }
+
+    lfs_dir_close(&lfs, &dir);
+
+    // Format new filename: launch_<latest + 1>.txt
+    snprintf(file_name, sizeof(file_name), "launch_%d.txt", latestLaunch + 1);
+}
 
 

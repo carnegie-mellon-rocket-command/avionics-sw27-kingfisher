@@ -27,6 +27,8 @@
 #define LFS_MEM_lookahead_size = 64,               // 64 bytes * 8 bits = 512 blocks tracked per allocations pass
 
 // Function Declarations
-void fs_Init(SPI_HandleTypeDef* hspi1,lfs_t* lfs);
+void fs_Init();
+void writeData(const char *text);
+void DetermineWriteFile(void);
 
 #endif // LFS_MEM_CONFIG
