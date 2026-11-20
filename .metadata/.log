@@ -1,0 +1,16 @@
+!SESSION 2026-11-20 16:22:12.309 -----------------------------------------------
+eclipse.buildId=Version 2.3.0
+java.version=21.0.12.1
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=aarch64, WS=cocoa, NL=en_US
+Framework arguments:  -keyring /Users/rahimmalik/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch aarch64 -keyring /Users/rahimmalik/.eclipse_keyring
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2026-11-20 16:22:31.974
+!MESSAGE Log4j2 initialized with config file /Users/rahimmalik/Developer/CMRC/kingfisher-sw/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2026-11-20 16:23:10.928
+!MESSAGE Started RMI Server, listening on port 41337
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2026-11-20 16:23:15.672
+!MESSAGE ProjectImporter: registered
