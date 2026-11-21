@@ -1,0 +1,8 @@
+../Core/Src/imu.c:28:16:plat_write	48	static
+../Core/Src/imu.c:35:16:plat_read	48	static
+../Core/Src/imu.c:42:13:plat_delay	16	static
+../Core/Src/imu.c:44:13:select_device	32	static
+../Core/Src/imu.c:60:13:verify_fixed_address	16	static
+../Core/Src/imu.c:72:13:configure_and_verify	16	static
+../Core/Src/imu.c:109:6:imu_init	80	static
+../Core/Src/imu.c:199:6:imu_read	40	static

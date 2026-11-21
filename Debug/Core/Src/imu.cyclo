@@ -1,0 +1,8 @@
+../Core/Src/imu.c:28:16:plat_write	2
+../Core/Src/imu.c:35:16:plat_read	2
+../Core/Src/imu.c:42:13:plat_delay	1
+../Core/Src/imu.c:44:13:select_device	5
+../Core/Src/imu.c:60:13:verify_fixed_address	4
+../Core/Src/imu.c:72:13:configure_and_verify	26
+../Core/Src/imu.c:109:6:imu_init	20
+../Core/Src/imu.c:199:6:imu_read	7

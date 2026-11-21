@@ -23,6 +23,7 @@
 #include "kalman.h"
 #include "servo.h"
 #include "flashlog.h"
+#include "piezo.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -54,7 +55,9 @@ static void led_toggle(void)  { HAL_GPIO_TogglePin(STATUS_LED_PORT, STATUS_LED_P
 static void fatal_fault(const char *reason)
 {
     printf("[FAULT] %s; system NOT ARMED\r\n", reason);
+    piezo_set_fault();
     while (1) {
+        piezo_update();
         led_toggle();
         HAL_Delay(100);
     }
@@ -66,6 +69,7 @@ static void boot_delay(uint32_t delay_ms)
     uint32_t start = HAL_GetTick();
     while (HAL_GetTick() - start < delay_ms) {
         led_set(((HAL_GetTick() / 500u) & 1u) == 0u);
+        piezo_update();
         HAL_Delay(20);
     }
 }
@@ -222,11 +226,33 @@ static bool detectLanding(void)
     return (now - still_since) >= LANDING_HOLD_MS;
 }
 
+static void confirmLanding(void)
+{
+    if (gLanded) return;
+
+    gLanded = true;
+    piezo_set_landed();
+    uint32_t flight_time_ms = HAL_GetTick() - gLaunchTime;
+    const char *reason = (flight_time_ms > LANDING_CUTOFF_MS)
+                       ? "five-minute cutoff" : "stillness criteria";
+    printf("[FLIGHT] Landing detected by %s at %lu ms after launch "
+           "(filtered accel=%.2f ft/s^2, velocity=%.2f ft/s)\r\n",
+           reason, (unsigned long)flight_time_ms,
+           (double)gAccelFiltered, (double)gVelocityFiltered);
+}
+
 /* ***************** STARTUP ***************** */
 void ats_init(void)
 {
+    piezo_init();
+    piezo_set_ready(false);
     led_set(false);
     printf("\r\n[BOOT] Kingfisher ATS startup; status LED solid is reserved for verified READY\r\n");
+    printf("[BOOT] Piezo startup chime test starting\r\n");
+    piezo_play_startup_chime();
+    boot_delay(1300u);
+    piezo_set_ready(false);
+    printf("[BOOT] Piezo startup chime test complete\r\n");
 
     /* Park every chip-select high so no device on the shared SPI bus listens to the others' traffic */
     HAL_GPIO_WritePin(FLASH_SS_GPIO_Port, FLASH_SS_Pin, GPIO_PIN_SET);
@@ -269,6 +295,7 @@ void ats_init(void)
     gLaunchTime = gStartTime;
     gPrevLoopTime = gStartTime;
     led_set(true);
+    piezo_set_ready(true);
     printf("[READY] Flash, IMU and barometer checks verified; system armed. "
            "Servo has no feedback. Status LED is solid.\r\n");
 }
@@ -289,8 +316,11 @@ void ats_run_once(void)
     } else if (!gLaunched) {
         fatal_fault(!imu_ok ? "IMU sample failed before launch" : "barometer sample failed before launch");
     } else {
-        if (!gFlightFault) printf("[FAULT] Sensor sample failed in flight; retracting ATS\r\n");
-        gFlightFault = true;
+        if (!gFlightFault) {
+            printf("[FAULT] Sensor sample failed in flight; retracting ATS\r\n");
+            gFlightFault = true;
+            piezo_set_fault();
+        }
         gATSPosition = ATS_IN;
         setATSPosition(ATS_IN);
     }
@@ -308,16 +338,34 @@ void ats_run_once(void)
         attachATS();                                        /* bring the ATS online */
         setATSPosition(ATS_IN);
         led_set(true);
+        piezo_play_event(PIEZO_EVENT_LAUNCH);
         printf("[FLIGHT] Launch confirmed by %u consecutive valid acceleration samples\r\n",
                (unsigned)LAUNCH_CONFIRM_SAMPLES);
+    }
+
+    /* These are timer cues; this board has no motor burnout or apogee sensor. */
+    static bool burnout_timer_announced = false;
+    static bool retraction_timer_announced = false;
+    if (gLaunched) {
+        uint32_t flight_time_ms = HAL_GetTick() - gLaunchTime;
+        if (!burnout_timer_announced && flight_time_ms >= ATS_ACTIVE_AFTER_MS) {
+            burnout_timer_announced = true;
+            printf("[FLIGHT] Burnout timer elapsed at %lu ms after launch\r\n", (unsigned long)flight_time_ms);
+            piezo_play_event(PIEZO_EVENT_BURNOUT_TIMER);
+        }
+        if (!retraction_timer_announced && flight_time_ms >= ATS_RETRACT_AFTER_MS) {
+            retraction_timer_announced = true;
+            printf("[FLIGHT] Final retraction timer elapsed at %lu ms after launch\r\n", (unsigned long)flight_time_ms);
+            piezo_play_event(PIEZO_EVENT_RETRACTION_TIMER);
+        }
     }
 
     /* **** (DURING FLIGHT) **** adjust flaps, watch for landing */
     if (gLaunched && !gFlightFault) {
         adjustATS();
-        if (detectLanding()) gLanded = true;
+        if (detectLanding()) confirmLanding();
     } else if (gLaunched) {
-        if (detectLanding()) gLanded = true;
+        if (detectLanding()) confirmLanding();
         led_set(((HAL_GetTick() / 100u) & 1u) != 0u);       /* persistent fast fault blink */
     } else {
         /* Still on the pad: keep measuring the pad altitude so the target is "ALT_TARGET above the pad" */
@@ -345,6 +393,7 @@ void ats_run_once(void)
             if (!gLaunched) fatal_fault("flash logging failed before launch");
             printf("[FAULT] Flash logging failed in flight; retracting ATS\r\n");
             gFlightFault = true;
+            piezo_set_fault();
             gATSPosition = ATS_IN;
             setATSPosition(ATS_IN);
         }
@@ -354,6 +403,7 @@ void ats_run_once(void)
     if (gLanded) {
         flashlog_flush();                                   /* write the last partial page */
         detachATS();
-        while (1) { led_toggle(); HAL_Delay(500); }         /* slow blink = landed, data saved */
+        while (1) { piezo_update(); led_toggle(); HAL_Delay(20); } /* slow blink = landed, data saved */
     }
+    piezo_update();
 }

@@ -1,0 +1,17 @@
+../Drivers/CMSIS/Include/core_cm4.h:2064:26:ITM_SendChar	4
+../Core/Src/flashlog.c:28:20:cs_low	1
+../Core/Src/flashlog.c:29:20:cs_high	1
+../Core/Src/flashlog.c:33:13:wait_ready	8
+../Core/Src/flashlog.c:51:13:write_enable	1
+../Core/Src/flashlog.c:60:13:read_status1	3
+../Core/Src/flashlog.c:70:13:write_disable	1
+../Core/Src/flashlog.c:80:13:page_program	5
+../Core/Src/flashlog.c:93:13:read_bytes	4
+../Core/Src/flashlog.c:105:13:page_is_erased	6
+../Core/Src/flashlog.c:115:6:flashlog_init	15
+../Core/Src/flashlog.c:151:6:flashlog_append	5
+../Core/Src/flashlog.c:168:6:flashlog_flush	6
+../Core/Src/flashlog.c:182:6:flashlog_erase_all	5
+../Core/Src/flashlog.c:198:10:flashlog_record_count	1
+../Core/Src/flashlog.c:205:5:_write	2
+../Core/Src/flashlog.c:212:6:flashlog_dump_csv	6
