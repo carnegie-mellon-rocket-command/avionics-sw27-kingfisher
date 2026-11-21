@@ -1,5 +1,5 @@
 ../Core/Src/servo.c:10:6:servo_init	5
-../Core/Src/servo.c:25:6:servo_attach	5
-../Core/Src/servo.c:33:6:servo_detach	2
-../Core/Src/servo.c:40:6:servo_attached	1
-../Core/Src/servo.c:42:6:servo_write_degrees	6
+../Core/Src/servo.c:25:6:servo_attach	6
+../Core/Src/servo.c:34:6:servo_detach	2
+../Core/Src/servo.c:41:6:servo_attached	1
+../Core/Src/servo.c:43:6:servo_write_degrees	6

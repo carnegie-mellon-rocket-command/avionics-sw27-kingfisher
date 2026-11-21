@@ -22,12 +22,13 @@ void servo_init(TIM_HandleTypeDef *htim, uint32_t channel)
     HAL_TIM_GenerateEvent(tim, TIM_EVENTSOURCE_UPDATE);      /* load the new prescaler now */
 }
 
-void servo_attach(void)
+bool servo_attach(void)
 {
-    if (attached) return;
+    if (attached) return true;
     __HAL_TIM_SET_COMPARE(tim, chan, pulse_us);
-    HAL_TIM_PWM_Start(tim, chan);
+    if (HAL_TIM_PWM_Start(tim, chan) != HAL_OK) return false;
     attached = true;
+    return true;
 }
 
 void servo_detach(void)

@@ -80,7 +80,7 @@ static void boot_delay(uint32_t delay_ms)
 
 /* ***************** ATS (FLAP) METHODS ***************** */
 /** @brief Start the servo (flaps hold position). */
-static void attachATS(void) { if (!SKIP_ATS) servo_attach(); }
+static bool attachATS(void) { return SKIP_ATS || servo_attach(); }
 
 /** @brief Stop the servo (saves power). */
 static void detachATS(void) { if (!SKIP_ATS) servo_detach(); }
@@ -98,18 +98,29 @@ static void setATSPosition(float percent_rot)
 /** @brief Self-test: fully extend and retract the flaps, then detach. Takes ~6 s at startup. */
 static void testATS(void)
 {
+    if (SKIP_ATS) {
+        printf("[BOOT] Servo test skipped (SKIP_ATS=1)\r\n");
+        return;
+    }
     printf("[BOOT] Servo command test starting (no position feedback is fitted)\r\n");
-    attachATS();
+    if (!attachATS()) fatal_fault("servo PWM start failed");
+    if (!(htim2.Instance->CR1 & TIM_CR1_CEN) || !(htim2.Instance->CCER & TIM_CCER_CC3E))
+        fatal_fault("TIM2 channel 3 did not enable");
+    printf("[SERVO] PWM enabled: PSC=%lu ARR=%lu CCR3=%lu\r\n",
+           (unsigned long)htim2.Instance->PSC,
+           (unsigned long)htim2.Instance->ARR,
+           (unsigned long)htim2.Instance->CCR3);
     setATSPosition(ATS_IN);
+    printf("[SERVO] retract command: CCR3=%lu\r\n", (unsigned long)htim2.Instance->CCR3);
     boot_delay(2000);
     setATSPosition(ATS_OUT);
+    printf("[SERVO] extend command: CCR3=%lu\r\n", (unsigned long)htim2.Instance->CCR3);
     boot_delay(2000);
     setATSPosition(ATS_IN);
+    printf("[SERVO] retract command: CCR3=%lu\r\n", (unsigned long)htim2.Instance->CCR3);
     boot_delay(2000);
-    detachATS();
-    printf("[BOOT] Servo command test complete; physical motion was not electronically verified\r\n");
+    printf("[BOOT] Servo PWM remains active at retracted command; physical motion is not electronically verified\r\n");
 }
-
 static void print_imu_debug(const imu_data_t *d)
 {
 #if DEBUG
@@ -266,12 +277,6 @@ void ats_init(void)
 
     /* Flash (data storage) */
     if (!flashlog_init(&hspi1, FLASH_SS_GPIO_Port, FLASH_SS_Pin)) fatal_fault(flashlog_last_error());
-    if (flashlog_interrupted_flight()) {
-        servo_init(&htim2, TIM_CHANNEL_3);
-        setATSPosition(ATS_IN);
-        attachATS();
-        fatal_fault("reset during unfinished flight; flaps retracted; clear flight latch after recovery");
-    }
     piezo_play_startup_chime();
     boot_delay(1300u);
     piezo_set_ready(false);
@@ -281,8 +286,10 @@ void ats_init(void)
     led_set(true);
 #endif
 
-#if DEBUG
+#if DUMP_MODE
     flashlog_dump_csv();
+    printf("[DUMP] Complete; system NOT ARMED\r\n");
+    while (1) HAL_Delay(100);
 #endif
 
     /* Sensors */
@@ -349,7 +356,7 @@ void ats_run_once(void)
         if (!flashlog_mark_launch()) fatal_fault("could not persist launch marker");
         gLaunched = true;
         gLaunchTime = HAL_GetTick();
-        attachATS();                                        /* bring the ATS online */
+        if (!attachATS()) fatal_fault("servo PWM start failed at launch");
         setATSPosition(ATS_IN);
         led_set(true);
         piezo_play_event(PIEZO_EVENT_LAUNCH);

@@ -1,5 +1,8 @@
 #include "piezo.h"
 #include "main.h"
+#include "ats_config.h"
+
+#if ENABLE_PIEZO
 
 /* PA0 is TIM5_CH1 on STM32F413. Use TIM5 so piezo tone generation cannot
  * change TIM2's 50 Hz servo period. The board's piezo is a passive transducer. */
@@ -178,3 +181,12 @@ void piezo_update(void)
         piezo_tone(false);
     }
 }
+#else
+void piezo_init(void) {}
+void piezo_set_ready(bool ready) { (void)ready; }
+void piezo_set_fault(void) {}
+void piezo_set_landed(void) {}
+void piezo_play_startup_chime(void) {}
+void piezo_play_event(piezo_event_t event) { (void)event; }
+void piezo_update(void) {}
+#endif

@@ -1,9 +1,7 @@
-../Core/Src/piezo.c:28:13:piezo_set_frequency	24	static
-../Core/Src/piezo.c:40:13:piezo_tone	24	static
-../Core/Src/piezo.c:48:6:piezo_init	40	static
-../Core/Src/piezo.c:72:6:piezo_set_ready	16	static
-../Core/Src/piezo.c:80:6:piezo_set_fault	8	static
-../Core/Src/piezo.c:88:6:piezo_set_landed	8	static
-../Core/Src/piezo.c:96:6:piezo_play_startup_chime	8	static
-../Core/Src/piezo.c:104:6:piezo_play_event	16	static
-../Core/Src/piezo.c:113:6:piezo_update	72	static
+../Core/Src/piezo.c:185:6:piezo_init	4	static
+../Core/Src/piezo.c:186:6:piezo_set_ready	16	static
+../Core/Src/piezo.c:187:6:piezo_set_fault	4	static
+../Core/Src/piezo.c:188:6:piezo_set_landed	4	static
+../Core/Src/piezo.c:189:6:piezo_play_startup_chime	4	static
+../Core/Src/piezo.c:190:6:piezo_play_event	16	static
+../Core/Src/piezo.c:191:6:piezo_update	4	static

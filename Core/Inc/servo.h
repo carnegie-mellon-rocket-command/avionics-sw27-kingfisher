@@ -11,7 +11,7 @@
 #include <stdbool.h>
 
 void servo_init(TIM_HandleTypeDef *htim, uint32_t channel);
-void servo_attach(void);                 /* start PWM at the last commanded angle */
+bool servo_attach(void);                 /* false if HAL cannot start PWM */
 void servo_detach(void);                 /* stop PWM (saves power) */
 bool servo_attached(void);
 void servo_write_degrees(float deg);     /* 0..180, clamped; same scale as Arduino Servo.write() */

@@ -7,15 +7,15 @@ verification. CSV columns identify integer milli-units: divide those values by
 
 The littlefs sources came from the Kingfisher dev branch (`6c7dc87`). Its hardware
 wrapper was replaced to use PA3 chip select, propagate errors, and avoid formatting
-automatically on mount failure. The final 4 KB NOR sector holds a separate flight
-latch and is excluded from the filesystem.
+automatically on mount failure. The final 4 KB NOR sector holds legacy flight-state bytes and remains excluded
+from the filesystem.
 
 ## Normal operation
 
-Keep `ERASE_ON_BOOT=0`. `DEBUG=1` enables SWO diagnostics and prints existing files
-at startup, then flight initialization continues. `DEBUG=0` disables SWO transport.
-Large startup dumps delay initialization. The independent ST-LINK exporter works
-with either DEBUG setting. There is no DUMP_MODE or USB_MSC_MODE.
+Keep `ERASE_ON_BOOT=0`. `DEBUG=1` enables SWO diagnostics such as periodic IMU
+measurements. `DUMP_MODE=1` prints saved CSV files over SWO at startup, then stops
+before arming. Either flag enables SWO transport. The independent ST-LINK exporter
+works with both flags disabled. There is no USB_MSC_MODE.
 
 USB device communication has been removed. CPU startup uses 16 MHz HSI and does
 not depend on the USB clock, external crystal, or board USB-C data connections.
@@ -55,13 +55,7 @@ Raw logs from the earlier logger are not a littlefs volume. Mount failure faults
 without erasing data. To intentionally initialize storage, use `ERASE_ON_BOOT=1`
 for one bench boot, then restore 0 and reflash. Formatting destroys existing files.
 
-After launch, a reset/power loss before successful completion causes the next boot
-to command retraction and latch fault before the servo self-test. Rebooting does
-not clear that latch. The ST-LINK exporter remains serviced in the fault loop and
-can mount/read saved files after retraction, provided flash remains readable.
-After physical recovery and disarming, call `flashlog_clear_flight_latch()` through
-the debugger, check its true return value, then reset. A fault-free landing marks
-completion; the next boot clears that marker while preserving files.
+Each boot clears any legacy flight-state bytes, then runs normal startup and arming checks. CSV files remain intact. A power cycle during flight starts as a fresh boot; firmware does not retain flight phase across resets.
 
 ## Tests and limitations
 

@@ -14,8 +14,12 @@
 #ifdef DEBUG
 #undef DEBUG
 #endif
-/* 1 = enable SWO diagnostics and print saved CSV files at startup, then continue. */
-#define DEBUG               0
+/* 1 = enable SWO diagnostics such as periodic IMU measurements. */
+#define DEBUG               1
+/* 1 = print saved CSV files over SWO at startup, then stop before arming. */
+#define DUMP_MODE           0
+/* 1 = play piezo startup, status, event and fault sounds; 0 = silent. */
+#define ENABLE_PIEZO        0
 /* 1 = no servo is mounted: skip all servo calls (bench testing without the flap assembly) */
 #define SKIP_ATS            0
 /* 1 = format littlefs at boot. Destroys files. Use once, then restore 0 and reflash. */
@@ -63,8 +67,8 @@
 #define SERVO_MAX_PULSE_US  2400
 #define ATS_MIN   180.0f    /* servo angle when percent = 1.0 (flaps OUT) -- names are historical, don't "fix" */
 #define ATS_MAX   13.0f     /* servo angle when percent = 0.0 (flaps IN): 254 constraint from flaps / 270 (servo max) * 180 */
-#define ATS_IN    0.0f      /* flaps fully retracted */
-#define ATS_OUT   1.0f      /* flaps fully extended */
+#define ATS_IN    1.0f      /* flaps fully retracted */
+#define ATS_OUT   0.0f      /* flaps fully extended */
 
 /* ***************** KALMAN FILTER ***************** */
 /* States: [altitude (ft), velocity (ft/s), acceleration (ft/s^2)]. Observations: [altitude, acceleration]. */

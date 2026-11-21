@@ -70,8 +70,8 @@ static const struct lfs_config cfg={.read=bd_read,.prog=bd_prog,.erase=bd_erase,
 bool flashlog_interrupted_flight(void){return interrupted;}
 bool flashlog_clear_flight_latch(void){if(!erase(LATCH_ADDRESS))return false; interrupted=false;return true;}
 static bool mark(unsigned off){const uint8_t zero=0;return program(LATCH_ADDRESS+off,&zero,1);}
-bool flashlog_mark_launch(void){return mark(0);}
-bool flashlog_mark_landed(void){return mark(1);}
+bool flashlog_mark_launch(void){if(!mark(0))return false;interrupted=true;return true;}
+bool flashlog_mark_landed(void){if(!mark(1))return false;interrupted=false;return true;}
 static bool mount_fs(void) {
     last_error="littlefs mount failed (unformatted, old raw logs, or corrupt filesystem)";
     if(lfs_mount(&fs,&cfg)<0)return false;
@@ -94,10 +94,9 @@ bool flashlog_init(SPI_HandleTypeDef *hspi,GPIO_TypeDef *port,uint16_t pin) {
     if(!transfer(&cmd,1,id,3,false) || memcmp(id,"\xef\x40\x18",3))return false;
     last_error="flash flight-latch read failed";
     if(!read_at(LATCH_ADDRESS,latch,2))return false;
-    interrupted=latch[0]!=255 && latch[1]!=0;
-    if(!interrupted && latch[1]!=255 && !flashlog_clear_flight_latch())return false;
-    /* Retraction remains available even if the filesystem was damaged. */
-    if(interrupted)return true;
+    /* Clear legacy flight state on every boot; each power cycle starts fresh. */
+    interrupted=false;
+    if((latch[0]!=255 || latch[1]!=255) && !flashlog_clear_flight_latch())return false;
     {
         last_error="flash write-enable/write-disable verification failed";
         uint8_t status;
@@ -177,7 +176,7 @@ bool flashlog_read_file(const char *name,uint32_t offset,void *data,uint16_t siz
 }
 int _write(int fd,char *ptr,int len) {
     (void)fd;
-#if DEBUG
+#if DEBUG || DUMP_MODE
     if((ITM->TCR&ITM_TCR_ITMENA_Msk) && (ITM->TER&1u)) {
         uint32_t start=HAL_GetTick();
         for(int i=0;i<len;i++) {
