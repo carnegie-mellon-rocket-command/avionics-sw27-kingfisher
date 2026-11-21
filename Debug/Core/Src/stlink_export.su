@@ -1,0 +1,2 @@
+../Core/Src/stlink_export.c:7:6:stlink_export_init	8	static
+../Core/Src/stlink_export.c:12:6:stlink_export_poll	56	static,ignoring_inline_asm

@@ -28,7 +28,9 @@ Core/Src/flashlog.o: ../Core/Src/flashlog.c ../Core/Inc/flashlog.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_pwr_ex.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_spi.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h \
- ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h
+ ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h \
+ ../Core/Inc/ats_config.h ../Core/Inc/imu.h ../Core/Inc/ms5611.h \
+ ../Core/Inc/lfs.h ../Core/Inc/lfs_util.h
 ../Core/Inc/flashlog.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
@@ -61,3 +63,8 @@ Core/Src/flashlog.o: ../Core/Src/flashlog.c ../Core/Inc/flashlog.h \
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_spi.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h:
 ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h:
+../Core/Inc/ats_config.h:
+../Core/Inc/imu.h:
+../Core/Inc/ms5611.h:
+../Core/Inc/lfs.h:
+../Core/Inc/lfs_util.h:

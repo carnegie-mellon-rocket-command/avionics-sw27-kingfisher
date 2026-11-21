@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ats.h"
+#include "ats_config.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

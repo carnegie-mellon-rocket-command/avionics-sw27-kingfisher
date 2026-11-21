@@ -32,7 +32,7 @@ Core/Src/ats.o: ../Core/Src/ats.c ../Core/Inc/ats.h \
  ../Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h \
  ../Core/Inc/imu.h ../Core/Inc/ms5611.h ../Core/Inc/imu.h \
  ../Core/Inc/ms5611.h ../Core/Inc/kalman.h ../Core/Inc/servo.h \
- ../Core/Inc/flashlog.h ../Core/Inc/piezo.h
+ ../Core/Inc/flashlog.h ../Core/Inc/piezo.h ../Core/Inc/stlink_export.h
 ../Core/Inc/ats.h:
 ../Core/Inc/ats_config.h:
 ../Core/Inc/main.h:
@@ -74,3 +74,4 @@ Core/Src/ats.o: ../Core/Src/ats.c ../Core/Inc/ats.h \
 ../Core/Inc/servo.h:
 ../Core/Inc/flashlog.h:
 ../Core/Inc/piezo.h:
+../Core/Inc/stlink_export.h:

@@ -24,6 +24,7 @@
 #include "servo.h"
 #include "flashlog.h"
 #include "piezo.h"
+#include "stlink_export.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -43,6 +44,7 @@ static uint32_t gStartTime, gLaunchTime, gPrevLoopTime, gTimeDelta;   /* ms */
 static float    gAltFiltered, gVelocityFiltered, gAccelFiltered;      /* from the Kalman filter */
 static float    gPredictedAltitude;                                   /* where the rocket would peak at the current flap setting (ft) */
 static float    gATSPosition = ATS_IN;                                /* commanded flap position, 0 (in) .. 1 (out) */
+static float    gATSCommand = ATS_IN;
 static bool     gLaunched = false, gLanded = false;
 static bool     gFlightFault = false;
 static float    absolute_alt_target = ALT_TARGET;                     /* ALT_TARGET is above the pad; this one is above sea level */
@@ -57,6 +59,7 @@ static void fatal_fault(const char *reason)
     printf("[FAULT] %s; system NOT ARMED\r\n", reason);
     piezo_set_fault();
     while (1) {
+        stlink_export_poll();
         piezo_update();
         led_toggle();
         HAL_Delay(100);
@@ -68,6 +71,7 @@ static void boot_delay(uint32_t delay_ms)
 {
     uint32_t start = HAL_GetTick();
     while (HAL_GetTick() - start < delay_ms) {
+        stlink_export_poll();
         led_set(((HAL_GetTick() / 500u) & 1u) == 0u);
         piezo_update();
         HAL_Delay(20);
@@ -85,6 +89,7 @@ static void detachATS(void) { if (!SKIP_ATS) servo_detach(); }
   * @arg percent_rot: 0 (fully in) .. 1 (fully out). Mapped to the servo angle range ATS_MAX..ATS_MIN. */
 static void setATSPosition(float percent_rot)
 {
+    gATSCommand = percent_rot;
     if (SKIP_ATS) return;
     float pos = ATS_MIN - (ATS_MIN - ATS_MAX) * (1.0f - percent_rot);
     servo_write_degrees(pos);
@@ -107,6 +112,7 @@ static void testATS(void)
 
 static void print_imu_debug(const imu_data_t *d)
 {
+#if DEBUG
     static uint32_t last_print = 0;
     uint32_t now = HAL_GetTick();
     if (now - last_print < IMU_DEBUG_PERIOD_MS) return;
@@ -124,6 +130,9 @@ static void print_imu_debug(const imu_data_t *d)
     printf("[IMU %lu ms] accel_mg=(%ld,%ld,%ld) mag=%ld gyro_mdps=(%ld,%ld,%ld) temp_centiC=%ld\r\n",
            (unsigned long)now, ax_mg, ay_mg, az_mg, mag_mg,
            gx_mdps, gy_mdps, gz_mdps, temp_centi_c);
+#else
+    (void)d;
+#endif
 }
 
 /** @brief PD controller.
@@ -194,7 +203,7 @@ static void adjustATS(void)
 static void runTimer(void)
 {
     uint32_t now;
-    while ((now = HAL_GetTick()) - gPrevLoopTime < LOOP_TARGET_MS) { /* wait */ }
+    while ((now = HAL_GetTick()) - gPrevLoopTime < LOOP_TARGET_MS) { stlink_export_poll(); }
     gTimeDelta = now - gPrevLoopTime;
     gPrevLoopTime = now;
 }
@@ -244,15 +253,11 @@ static void confirmLanding(void)
 /* ***************** STARTUP ***************** */
 void ats_init(void)
 {
+    stlink_export_init();
     piezo_init();
     piezo_set_ready(false);
     led_set(false);
     printf("\r\n[BOOT] Kingfisher ATS startup; status LED solid is reserved for verified READY\r\n");
-    printf("[BOOT] Piezo startup chime test starting\r\n");
-    piezo_play_startup_chime();
-    boot_delay(1300u);
-    piezo_set_ready(false);
-    printf("[BOOT] Piezo startup chime test complete\r\n");
 
     /* Park every chip-select high so no device on the shared SPI bus listens to the others' traffic */
     HAL_GPIO_WritePin(FLASH_SS_GPIO_Port, FLASH_SS_Pin, GPIO_PIN_SET);
@@ -260,16 +265,24 @@ void ats_init(void)
     HAL_GPIO_WritePin(LORA_SS_GPIO_Port,  LORA_SS_Pin,  GPIO_PIN_SET);
 
     /* Flash (data storage) */
-    if (!flashlog_init(&hspi1, FLASH_SS_GPIO_Port, FLASH_SS_Pin)) fatal_fault("flash identity/communication check failed");
+    if (!flashlog_init(&hspi1, FLASH_SS_GPIO_Port, FLASH_SS_Pin)) fatal_fault(flashlog_last_error());
+    if (flashlog_interrupted_flight()) {
+        servo_init(&htim2, TIM_CHANNEL_3);
+        setATSPosition(ATS_IN);
+        attachATS();
+        fatal_fault("reset during unfinished flight; flaps retracted; clear flight latch after recovery");
+    }
+    piezo_play_startup_chime();
+    boot_delay(1300u);
+    piezo_set_ready(false);
 
 #if ERASE_ON_BOOT
     if (!flashlog_erase_all(led_toggle)) fatal_fault("flash erase failed");
     led_set(true);
 #endif
 
-#if DUMP_MODE
-    flashlog_dump_csv();                                   /* read-out mode: print the log and stop */
-    while (1) { led_toggle(); HAL_Delay(1000); }
+#if DEBUG
+    flashlog_dump_csv();
 #endif
 
     /* Sensors */
@@ -333,6 +346,7 @@ void ats_run_once(void)
         launch_confirm_count = 0;
     }
     if (launch_confirm_count >= LAUNCH_CONFIRM_SAMPLES && !gLaunched) {
+        if (!flashlog_mark_launch()) fatal_fault("could not persist launch marker");
         gLaunched = true;
         gLaunchTime = HAL_GetTick();
         attachATS();                                        /* bring the ATS online */
@@ -384,7 +398,7 @@ void ats_run_once(void)
             .vel_filt_fps    = gVelocityFiltered,
             .accel_filt_fps2 = gAccelFiltered,
             .temp_c          = imu.temp_c,
-            .ats_position    = gATSPosition,
+            .ats_position    = gATSCommand,
             .alt_pred_ft     = gPredictedAltitude,
             .flags           = (gLaunched ? LOG_FLAG_LAUNCHED : 0u) |
                                (gFlightFault ? LOG_FLAG_FAULT : 0u),
@@ -401,9 +415,23 @@ void ats_run_once(void)
 
     /* **** (END OF FLIGHT) **** */
     if (gLanded) {
-        flashlog_flush();                                   /* write the last partial page */
+        if (!flashlog_flush()) {
+            printf("[FAULT] Flash: landing flush or verification failed\r\n");
+            gFlightFault = true;
+            piezo_set_fault();
+        }
+        if (!gFlightFault && !flashlog_mark_landed()) {
+            gFlightFault = true;
+            piezo_set_fault();
+        }
         detachATS();
-        while (1) { piezo_update(); led_toggle(); HAL_Delay(20); } /* slow blink = landed, data saved */
+        while (1) {
+            stlink_export_poll();
+            piezo_update();
+            led_set(((HAL_GetTick() / 500u) & 1u) != 0u);
+            HAL_Delay(20);
+        }
     }
     piezo_update();
+    stlink_export_poll();
 }

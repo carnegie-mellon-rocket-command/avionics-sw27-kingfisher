@@ -11,13 +11,15 @@
 #include "ms5611.h"
 
 /* ***************** META (build switches) ***************** */
+#ifdef DEBUG
+#undef DEBUG
+#endif
+/* 1 = enable SWO diagnostics and print saved CSV files at startup, then continue. */
+#define DEBUG               0
 /* 1 = no servo is mounted: skip all servo calls (bench testing without the flap assembly) */
 #define SKIP_ATS            0
-/* 1 = erase the whole flash chip at boot (~40 s, LED blinks). Use ONCE on the pad, then set back to 0
- *     and reflash, otherwise every reboot wipes your data. */
+/* 1 = format littlefs at boot. Destroys files. Use once, then restore 0 and reflash. */
 #define ERASE_ON_BOOT       0
-/* 1 = at boot, print the stored log as CSV over SWO and stop (no flight code runs). Used after recovery. */
-#define DUMP_MODE           0
 /* 1 = log from power-on instead of from launch detection (handy for bench tests; fills flash ~2 KB/s) */
 #define LOG_BEFORE_LAUNCH   0
 

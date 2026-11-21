@@ -2,15 +2,10 @@
  *
  * Wiring: SPI1 (shared bus), CS = PA3 (FLASH_SS). 16 MB, 256-byte pages, 4 KB sectors.
  *
- * Design:
- *  - Fixed 64-byte binary records, 4 per page. No filesystem (erases stall; they would break the 30 ms loop).
- *  - Records are buffered in RAM and written one full page at a time. The page-program is started
- *    but NOT waited for; the next flash call waits for it (~1 ms), so the loop is never blocked long.
- *  - Data is always appended after existing data. The write pointer is found at boot by binary
- *    search for the first erased page, so a reset mid-flight just continues where it left off.
- *  - Erase is a separate, slow (~40 s, up to 200 s) step done on the pad -- NEVER in flight.
- *
- * Capacity at 33 Hz x 64 B = ~2.1 KB/s -> ~2 hours.
+ * Each boot that logs data creates F000001.CSV, F000002.CSV, etc. on littlefs.
+ * Rows are synchronized before append reports success. Program and erase operations
+ * are verified. The last 4 KB sector is excluded from littlefs and holds the flight latch.
+ * Filesystem commits can exceed the flight loop period; measure on the actual board.
  */
 #ifndef FLASHLOG_H
 #define FLASHLOG_H
@@ -39,25 +34,35 @@ typedef struct __attribute__((packed)) {
 
 _Static_assert(sizeof(log_record_t) == 64, "log_record_t must be 64 bytes (4 per 256-byte page)");
 
-/* Checks the exact W25Q128 JEDEC ID, verifies the write-enable latch without
- * modifying data, and locates the write pointer. */
+/* Checks W25Q128 identity and mounts littlefs. Never formats on mount failure. */
 bool     flashlog_init(SPI_HandleTypeDef *hspi, GPIO_TypeDef *cs_port, uint16_t cs_pin);
+const char *flashlog_last_error(void);
 
 /* Appends one record. Returns false if the flash is full or a write timed out. */
 bool     flashlog_append(const log_record_t *rec);
 
-/* Writes out any partly filled page (unused bytes stay 0xFF). Call once after landing. */
-void     flashlog_flush(void);
+/* Synchronizes the current file. False means data durability could not be verified. */
+bool     flashlog_flush(void);
+bool     flashlog_interrupted_flight(void);
+bool     flashlog_mark_launch(void);
+bool     flashlog_mark_landed(void);
+/* Call only after recovery, with the vehicle disarmed. Clears the reset fault latch. */
+bool     flashlog_clear_flight_latch(void);
+bool     flashlog_list(unsigned index, char name[16], uint32_t *size);
+/* 1=file, 0=end, -1=directory/read error. */
+int      flashlog_file_info(unsigned index, char name[16], uint32_t *size);
+bool     flashlog_readout_ok(void);
+bool     flashlog_scan(bool (*visit)(const char *, uint32_t, void *), void *context);
+bool     flashlog_read_file(const char *name, uint32_t offset, void *data, uint16_t size);
 
-/* Erases the entire chip. Blocking, ~40 s. 'tick' (may be NULL) is called about every 100 ms
- * so you can blink an LED. After this the log is empty. */
+/* Explicitly formats littlefs. Destroys files, preserves the independent flight latch.
+ * Refuses while a file is open or the interrupted-flight latch is active. */
 bool     flashlog_erase_all(void (*tick)(void));
 
-/* Number of records currently stored (including any buffered in RAM). */
+/* Number of rows committed by this boot. */
 uint32_t flashlog_record_count(void);
 
-/* Prints every stored record as CSV through printf (ITM/SWO -- see flashlog.c).
- * Header matches last year's data format. */
+/* Dumps file contents through SWO when DEBUG=1. */
 void     flashlog_dump_csv(void);
 
 #endif
