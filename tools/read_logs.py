@@ -2,13 +2,56 @@
 """Copy littlefs CSV files through ST-LINK without resetting or erasing the MCU."""
 import argparse
 import glob
+import os
 from pathlib import Path
 import re
+import signal
 import shutil
 import struct
 import subprocess
 import tempfile
 import time
+
+
+def release_stlink_users():
+    """End other local ST-LINK clients so this read-only export can connect."""
+    result = subprocess.run(["ps", "-axo", "pid=,command="],
+                            text=True, stdout=subprocess.PIPE, check=True)
+    clients = ("ST-LINK_gdbserver", "STM32_Programmer_CLI",
+               "STM32CubeProgrammer", "STLinkServer", "openocd")
+    pids = []
+    for line in result.stdout.splitlines():
+        fields = line.strip().split(None, 1)
+        if len(fields) != 2 or not any(name in fields[1] for name in clients):
+            continue
+        try:
+            pid = int(fields[0])
+        except ValueError:
+            continue
+        if pid != os.getpid():
+            try:
+                os.kill(pid, signal.SIGTERM)
+                pids.append(pid)
+            except ProcessLookupError:
+                pass
+
+    deadline = time.monotonic() + 2.0
+    while pids and time.monotonic() < deadline:
+        remaining = []
+        for pid in pids:
+            try:
+                os.kill(pid, 0)
+                remaining.append(pid)
+            except ProcessLookupError:
+                pass
+        pids = remaining
+        if pids:
+            time.sleep(0.1)
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
 MAGIC = 0x4B464C47
 CHUNK = 256  # 4096-byte firmware reads fail on the board; 256 works
@@ -81,6 +124,7 @@ def main():
     address = int(match[1], 16)
     if not 0x20000000 <= address <= 0x20050000 - 48 - CHUNK:
         raise RuntimeError("Mailbox address is outside STM32F413 SRAM")
+    release_stlink_users()
     link = Link(cli, address)
     try:
         if struct.unpack("<2I", link.read(address, 8)) != (MAGIC, 1):

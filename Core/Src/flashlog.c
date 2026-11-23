@@ -139,9 +139,11 @@ bool flashlog_append(const log_record_t *r) {
         (unsigned long)r->time_ms,milli(r->pressure_hpa),milli(r->alt_raw_ft),milli(r->accel_x),milli(r->accel_y),milli(r->accel_z),
         milli(r->gyro_x),milli(r->gyro_y),milli(r->gyro_z),milli(r->alt_filt_ft),milli(r->vel_filt_fps),milli(r->accel_filt_fps2),
         milli(r->temp_c),milli(r->ats_position),milli(r->alt_pred_ft),(unsigned long)r->flags);
-    /* Commit every accepted row. Worst-case erase latency needs board measurement. */
-    if(n<0 || n>=(int)sizeof(line) || lfs_file_write(&fs,&file,line,n)!=n || lfs_file_sync(&fs,&file)<0){failed=true;return false;}
-    records++;return true;
+    if(n<0 || n>=(int)sizeof(line) || lfs_file_write(&fs,&file,line,n)!=n){failed=true;return false;}
+    records++;
+    /* Commit the first row, then batch commits to keep sync work out of each loop. */
+    if((records==1u || records%16u==0u) && lfs_file_sync(&fs,&file)<0){failed=true;return false;}
+    return true;
 }
 bool flashlog_flush(void){return !failed && (!opened || lfs_file_sync(&fs,&file)==0);}
 uint32_t flashlog_record_count(void){return records;}

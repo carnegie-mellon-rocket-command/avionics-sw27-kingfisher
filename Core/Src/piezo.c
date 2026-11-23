@@ -107,10 +107,10 @@ void piezo_play_startup_chime(void)
 void piezo_play_event(piezo_event_t event)
 {
     (void)event;
-    event_active = true;
     event_until = HAL_GetTick() + PIEZO_LONG_MS;
     piezo_set_frequency(PIEZO_TONE_HZ);
     piezo_tone(true);
+    event_active = true;
 }
 
 void piezo_update(void)

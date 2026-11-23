@@ -43,6 +43,10 @@ static kalman_t   kf;
 static uint32_t gStartTime, gLaunchTime, gPrevLoopTime, gTimeDelta;   /* ms */
 static float    gAltFiltered, gVelocityFiltered, gAccelFiltered;      /* from the Kalman filter */
 static float    gPredictedAltitude;                                   /* where the rocket would peak at the current flap setting (ft) */
+#if TEST_SERVO
+static uint32_t servo_test_next_ms;
+static bool servo_test_extended;
+#endif
 static float    gATSPosition = ATS_IN;                                /* commanded flap position, 0 (in) .. 1 (out) */
 static float    gATSCommand = ATS_IN;
 static bool     gLaunched = false, gLanded = false;
@@ -60,7 +64,6 @@ static void fatal_fault(const char *reason)
     piezo_set_fault();
     while (1) {
         stlink_export_poll();
-        piezo_update();
         led_toggle();
         HAL_Delay(100);
     }
@@ -73,7 +76,6 @@ static void boot_delay(uint32_t delay_ms)
     while (HAL_GetTick() - start < delay_ms) {
         stlink_export_poll();
         led_set(((HAL_GetTick() / 500u) & 1u) == 0u);
-        piezo_update();
         HAL_Delay(20);
     }
 }
@@ -95,7 +97,7 @@ static void setATSPosition(float percent_rot)
     servo_write_degrees(pos);
 }
 
-/** @brief Self-test: fully extend and retract the flaps, then detach. Takes ~6 s at startup. */
+/** @brief Self-test: extend and retract flaps, then hold retracted position until landing. */
 static void testATS(void)
 {
     if (SKIP_ATS) {
@@ -264,6 +266,22 @@ static void confirmLanding(void)
 /* ***************** STARTUP ***************** */
 void ats_init(void)
 {
+#if TEST_SERVO
+    led_set(false);
+    servo_init(&htim2, TIM_CHANNEL_3);
+    if (!servo_attach()) {
+        printf("[TEST_SERVO] PWM start failed; system NOT ARMED\r\n");
+        while (1) {
+            led_toggle();
+            HAL_Delay(150);
+        }
+    }
+    servo_test_extended = false;
+    setATSPosition(ATS_IN);
+    servo_test_next_ms = HAL_GetTick() + 2000u;
+    printf("[TEST_SERVO] Sweeping between ATS_IN and ATS_OUT every 2 s; flight logic disabled\r\n");
+    return;
+#endif
     stlink_export_init();
     piezo_init();
     piezo_set_ready(false);
@@ -323,6 +341,17 @@ void ats_init(void)
 /* ***************** MAIN LOOP BODY ***************** */
 void ats_run_once(void)
 {
+#if TEST_SERVO
+    uint32_t now = HAL_GetTick();
+    if ((int32_t)(now - servo_test_next_ms) >= 0) {
+        servo_test_extended = !servo_test_extended;
+        setATSPosition(servo_test_extended ? ATS_OUT : ATS_IN);
+        printf("[TEST_SERVO] Commanded ATS_%s\r\n", servo_test_extended ? "OUT" : "IN");
+        servo_test_next_ms = now + 2000u;
+    }
+    HAL_Delay(10);
+    return;
+#endif
     runTimer();                                             /* keeps the loop at a consistent rate */
 
     /* Get measurements */
@@ -434,11 +463,9 @@ void ats_run_once(void)
         detachATS();
         while (1) {
             stlink_export_poll();
-            piezo_update();
             led_set(((HAL_GetTick() / 500u) & 1u) != 0u);
             HAL_Delay(20);
         }
     }
-    piezo_update();
     stlink_export_poll();
 }
